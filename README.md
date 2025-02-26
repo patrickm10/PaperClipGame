@@ -26,7 +26,7 @@ A fun incremental game built using Python and Pygame. In this game, you start by
 
 1. Clone the repository to your local machine:
     ```bash
-    git clone https://github.com/your-username/paperclip-game.git
+    git clone https://github.com/patrickm10/paperclip-game.git
     ```
 2. Navigate to the project directory:
     ```bash
