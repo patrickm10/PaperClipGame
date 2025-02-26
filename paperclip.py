@@ -1,13 +1,13 @@
 import pygame
 import time
+import random
 
-# Initialize Pygame
 pygame.init()
+pygame.font.init()
 
-# Screen setup
+# Game Constants
 WIDTH, HEIGHT = 800, 600
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Paperclip Game")
+FPS = 60
 
 # Colors
 BLACK = (0, 0, 0)
@@ -20,198 +20,342 @@ YELLOW = (255, 204, 0)
 DARK_YELLOW = (204, 170, 0)
 GRAY = (169, 169, 169)
 
-# Font
+# Fonts
 font = pygame.font.Font(None, 40)
 small_font = pygame.font.Font(None, 30)
 
-# Game variables
-score = 0
-balance = 0
-rps = 0  # Rate per second
-last_update_time = time.time()
+class Player:
+    """Class to manage the player's score, balance, and rate per second (rps)."""
+    
+    def __init__(self):
+        self.score = 0
+        self.balance = 0
+        self.rps = 0  # Rate per second
+        self.upgrade_count = 0  # Number of times upgrade has been purchased
+        self.estates = 0  # Number of estates owned
+        self.create_value = 0  # Value for create button
+        self.level = 0 # Player level
 
-# Costs
-point_value = 10
-upgrade_cost = 50
-worker_cost = 200
-grand_worker_cost = 500
-estate_cost = 1000
+    def update(self, time_diff):
+        """Update the score and balance based on time."""
+        self.balance += self.rps * time_diff
+        self.score += self.rps * time_diff
 
-# Counts
-upgrade_count = 0
-worker_count = 0
-grand_worker_count = 0
-total_estates = 0
+class Worker:
+    """Class to manage workers and their effects on the game."""    
+    def __init__(self, cost, rps, name):
+        self.cost = cost
+        self.rps = rps
+        self.count = 0
+        self.name = name
 
-# Worker Rates
-worker_rps = 1
-grand_worker_rps = 5
+    def hire(self):
+        """Hire a worker and increase rps."""
+        self.count += 1
+        return self.rps
 
-# Time tracking
-last_worker_update = time.time()
+class Achievement:
+    """Class to manage and check achievements."""    
+    def __init__(self, name, condition, message, score_requirement=None):
+        self.name = name
+        self.condition = condition
+        self.message = message
+        self.score_requirement = score_requirement
+        self.achieved = False
 
-# Achievements
-achievements = {
-    "1000_points": {"score": 1000, "unlocked": False, "message": "Achievement Unlocked: 1000 Points!"},
-    "first_worker": {"achieved": False, "condition": lambda: worker_count > 0, "message": "Achievement Unlocked: Hired a worker!"},
-    "first_grand_worker": {"achieved": False, "condition": lambda: grand_worker_count > 0, "message": "Achievement Unlocked: Hired a grand worker!"},
-    "first_estate": {"achieved": False, "condition": lambda: total_estates > 0, "message": "Achievement Unlocked: Purchased an estate!"},
-    "ten_workers": {"achieved": False, "condition": lambda: worker_count >= 10, "message": "Achievement Unlocked: Hired 10 workers!"},
-    "five_grand_workers": {"achieved": False, "condition": lambda: grand_worker_count >= 5, "message": "Achievement Unlocked: Hired 5 grand workers!"},
-    "fifty_thousand_points": {"score": 50000, "unlocked": False, "message": "Achievement Unlocked: 50,000 Points!"},
-    "one_million_points": {"score": 1000000, "unlocked": False, "message": "Achievement Unlocked: 1 Million Points!"},
-}
+    def check(self, player, active_achievements):
+        """Check if an achievement is unlocked."""
+        if not self.achieved:
+            if (self.score_requirement and player.score >= self.score_requirement) or self.condition():
+                self.achieved = True
+                active_achievements.append((self.message, time.time()))
 
-# Track active achievement displays
-active_achievements = []  # List of tuples: (message, start_time)
+class Game:
+    """Main game class that handles game logic and UI.""" 
+    
+    def __init__(self):
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("Paperclip Game")
+        self.clock = pygame.time.Clock()
+        self.player = Player()
+        self.workers = {
+            'worker': Worker(200, 1, 'Worker'),
+            'grand_worker': Worker(500, 5, 'Grand Worker')
+        }
+        self.estates = {
+            'estate': Worker(1000, 10, 'Estate'),
+            'grand_estate': Worker(5000, 50, 'Grand Estate')
+        }
+        self.achievements = [
+            Achievement("1000_points", lambda: self.player.score >= 1000, "Achievement Unlocked: 1000 Points!", 1000),
+            Achievement("first_worker", lambda: self.workers['worker'].count > 0, "Achievement Unlocked: Hired a Worker!"),
+            Achievement("first_grand_worker", lambda: self.workers['grand_worker'].count > 0, "Achievement Unlocked: Hired a Grand Worker!"),
+            Achievement("10_workers", lambda: self.workers['worker'].count >= 10, "Achievement Unlocked: 10 Workers!"),
+            Achievement("100_workers", lambda: self.workers['worker'].count >= 100, "Achievement Unlocked: 100 Workers!"),
+            Achievement("1000_workers", lambda: self.workers['worker'].count >= 1000, "Achievement Unlocked: 1000 Workers!"),
+            Achievement("10_grand_workers", lambda: self.workers['grand_worker'].count >= 10, "Achievement Unlocked: 10 Grand Workers!"),
+            Achievement("100_grand_workers", lambda: self.workers['grand_worker'].count >= 100, "Achievement Unlocked: 100 Grand Workers!"),
+            Achievement("1000_grand_workers", lambda: self.workers['grand_worker'].count >= 1000, "Achievement Unlocked: 1000 Grand Workers!"),
+            Achievement("10_estates", lambda: self.estates['estate'].count >= 10, "Achievement Unlocked: 10 Estates!"),
+            Achievement("10_grand_estates", lambda: self.estates['grand_estate'].count >= 10, "Achievement Unlocked: 10 Grand Estates!")
+        ]
+        self.active_achievements = []
+        self.last_update_time = time.time()
+        self.mouse_click = False  # Track if a mouse click is currently active
+        self.spin_in_progress = False  # Track if the roulette wheel is spinning
+        self.bet_amount = 0  # Amount player has bet on roulette
+        self.upgrade_cost = 500  # Starting upgrade cost
+        self.upgrade_count = 0  # Track how many upgrades the player has purchased
 
-# Buttons
-create_button_rect = pygame.Rect(20, 120, 180, 50)
-upgrade_button_rect = pygame.Rect(20, 210, 180, 50)
-worker_button_rect = pygame.Rect(20, 300, 180, 50)
-grand_worker_button_rect = pygame.Rect(20, 390, 180, 50)
-estate_button_rect = pygame.Rect(20, 480, 180, 50)
+    def update_game(self):
+        """Update the game logic."""
+        current_time = time.time()
+        time_diff = current_time - self.last_update_time
+        self.last_update_time = current_time
 
+        # Recalculate RPS based on worker count
+        self.player.rps = sum(worker.count * worker.rps for worker in self.workers.values())
 
-def display_score():
-    """Displays the total score and balance."""
-    pygame.draw.rect(screen, BLACK, (0, 0, WIDTH, 40))
-    score_text = font.render(f"Total Score: {score:.1f}", True, WHITE)
-    score_text_rect = score_text.get_rect(center=(WIDTH // 2, 20))
-    screen.blit(score_text, score_text_rect)
+        # Update balance and score using the correct RPS value
+        self.player.update(time_diff)
 
-    balance_text = small_font.render(f"Balance: ${balance:.1f}", True, BLACK)
-    screen.blit(balance_text, (20, 50))
+        # Check for achievements
+        for achievement in self.achievements:
+            achievement.check(self.player, self.active_achievements)
 
-    rps_text = small_font.render(f"RPS: {rps:.1f}", True, BLACK)
-    screen.blit(rps_text, (20, 80))
+    def draw_ui(self):
+        """Draw the game UI including score, balance, and buttons."""
+        self.screen.fill(WHITE)
+        self.display_score()
+        self.draw_buttons()
+        self.draw_achievements()  # Call the method to display active achievements
+        self.draw_achievement_history()  # Call the method to display achievement history
 
+    def draw_achievements(self):
+        """Display the unlocked achievements on the screen."""
+        y_offset = HEIGHT - 150  # Starting Y position for the first achievement
+        x_offset = WIDTH // 2   # Starting X position for the first achievement
+        for achievement, unlock_time in self.active_achievements:
+            achievement_text = small_font.render(achievement, True, BLACK)
+            self.screen.blit(achievement_text, (x_offset, y_offset))
+            y_offset += 30  # Space out the achievements vertically
 
-def draw_buttons():
-    """Draws all buttons dynamically."""
-    pygame.draw.rect(screen, DARK_BLUE, create_button_rect, border_radius=10)
-    screen.blit(font.render("CREATE", True, WHITE), (create_button_rect.x + 10, create_button_rect.y + 10))
+    def draw_achievement_history(self):
+        """Draw a list of all unlocked achievements."""
+        button_rect = pygame.Rect(WIDTH - 250, HEIGHT - 50, 200, 40)
+        pygame.draw.rect(self.screen, DARK_BLUE, button_rect, border_radius=10)
+        self.screen.blit(small_font.render("Achievements", True, WHITE), (button_rect.x + 10, button_rect.y + 10))
 
-    pygame.draw.rect(screen, DARK_GREEN, upgrade_button_rect, border_radius=10)
-    screen.blit(font.render("UPGRADE", True, WHITE), (upgrade_button_rect.x + 10, upgrade_button_rect.y + 10))
-    screen.blit(small_font.render(f"Cost: ${upgrade_cost}", True, BLACK), (upgrade_button_rect.x, upgrade_button_rect.y + 60))
-    screen.blit(small_font.render(f"Count: {upgrade_count}", True, BLACK), (upgrade_button_rect.x + 200, upgrade_button_rect.y + 10))
+        if button_rect.collidepoint(pygame.mouse.get_pos()):
+            if pygame.mouse.get_pressed()[0] and not self.mouse_click:  # Left click
+                self.mouse_click = True
+                self.show_achievement_history()
+        elif not pygame.mouse.get_pressed()[0]:
+            self.mouse_click = False
 
-    pygame.draw.rect(screen, DARK_YELLOW, worker_button_rect, border_radius=10)
-    screen.blit(font.render("WORKER", True, BLACK), (worker_button_rect.x + 10, worker_button_rect.y + 10))
-    screen.blit(small_font.render(f"Cost: ${worker_cost}", True, BLACK), (worker_button_rect.x, worker_button_rect.y + 60))
-    screen.blit(small_font.render(f"Count: {worker_count}", True, BLACK), (worker_button_rect.x + 200, worker_button_rect.y + 10))
+    def show_achievement_history(self):
+        """Display the achievement history in a new window."""
+        history_screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        history_screen.fill(WHITE)
+        y_offset = 50
+        for achievement in self.active_achievements:
+            text = small_font.render(achievement[0], True, GREEN)
+            history_screen.blit(text, (WIDTH // 2 - 150, y_offset))
+            y_offset += 30  # Add space between achievements
+        pygame.display.update()
+        time.sleep(3)  # Display the history for 3 seconds
 
-    pygame.draw.rect(screen, DARK_BLUE, grand_worker_button_rect, border_radius=10)
-    screen.blit(font.render("GRAND", True, BLACK), (grand_worker_button_rect.x + 10, grand_worker_button_rect.y + 10))
-    screen.blit(small_font.render(f"Cost: ${grand_worker_cost}", True, BLACK), (grand_worker_button_rect.x, grand_worker_button_rect.y + 60))
-    screen.blit(small_font.render(f"Count: {grand_worker_count}", True, BLACK), (grand_worker_button_rect.x + 200, grand_worker_button_rect.y + 10))
+    def display_score(self):
+        """Display score, balance, and rate per second."""
+        pygame.draw.rect(self.screen, BLACK, (0, 0, WIDTH, 40))
+        score_text = font.render(f"Total Score: {self.player.score:.1f}", True, WHITE)
+        score_text_rect = score_text.get_rect(center=(WIDTH // 2, 20))
+        self.screen.blit(score_text, score_text_rect)
 
-    pygame.draw.rect(screen, DARK_YELLOW, estate_button_rect, border_radius=10)
-    screen.blit(font.render("ESTATE", True, BLACK), (estate_button_rect.x + 10, estate_button_rect.y + 10))
-    screen.blit(small_font.render(f"Cost: ${estate_cost}", True, BLACK), (estate_button_rect.x, estate_button_rect.y + 60))
-    screen.blit(small_font.render(f"Count: {total_estates}", True, BLACK), (estate_button_rect.x + 200, estate_button_rect.y + 10))
+        balance_text = small_font.render(f"Balance: ${int(self.player.balance)}", True, BLACK)
+        self.screen.blit(balance_text, (20, 50))
 
+        rps_text = small_font.render(f"RPS: {self.player.rps:.1f}", True, BLACK)
+        self.screen.blit(rps_text, (20, 80))
 
-def update_workers():
-    """Adds balance and score from workers every second."""
-    global last_worker_update, balance, rps, score
-    current_time = time.time()
-    if current_time - last_worker_update >= 1:
-        balance += rps  # Add balance based on the rate per second
-        score += rps    # Add to score based on the same rate
-        last_worker_update = current_time
+    def draw_buttons(self):
+        """Draw all the buttons for player actions."""
+        self.draw_worker_button("REG ELF", (20, 280), self.workers['worker'])
+        self.draw_worker_button("GRAND ELF", (20, 360), self.workers['grand_worker'])
+        self.draw_button("CREATE", (20, 120), lambda: self.create_points())
+        self.draw_upgrade_button("UPGRADE", (20, 200), lambda: self.upgrade_points())
+        self.draw_estate_button("ESTATE", (20, 440), self.estates['estate'])
+        self.draw_estate_button("GRAND ESTATE", (20, 520), self.estates['grand_estate'])
+        self.draw_roulette_button("BET & SPIN", (WIDTH // 2 - 100, HEIGHT // 2 - 25), lambda: self.place_bet())
 
+    def draw_worker_button(self, label, position, worker):
+        """Helper method to draw a worker button with cost and count."""
+        button_rect = pygame.Rect(position[0], position[1], 200, 50)
+        pygame.draw.rect(self.screen, DARK_BLUE, button_rect, border_radius=10)
+        self.screen.blit(font.render(label, True, WHITE), (button_rect.x + 10, button_rect.y + 10))
+        self.screen.blit(small_font.render(f"Cost: ${worker.cost}", True, BLACK), (button_rect.x + 5, button_rect.y + 55))
+        self.screen.blit(small_font.render(f"Count: {worker.count}", True, BLACK), (button_rect.x + 210, button_rect.y + 15))
 
-def check_achievements():
-    """
-    Checks and unlocks achievements based on game progress.
-    """
-    global active_achievements
-    for key, achievement in achievements.items():
-        if not achievement.get("achieved", False):
-            if "score" in achievement and score >= achievement["score"]:
-                achievement["achieved"] = True
-                active_achievements.append((achievement["message"], time.time()))
-            elif "condition" in achievement and achievement["condition"]():
-                achievement["achieved"] = True
-                active_achievements.append((achievement["message"], time.time()))
+        if button_rect.collidepoint(pygame.mouse.get_pos()):
+            if pygame.mouse.get_pressed()[0] and not self.mouse_click:  # Left click
+                self.mouse_click = True
+                self.hire_worker(worker)
+        elif not pygame.mouse.get_pressed()[0]:
+            self.mouse_click = False
 
+    def draw_button(self, label, position, action):
+        """Helper method to draw a generic button."""
+        button_rect = pygame.Rect(position[0], position[1], 200, 50)
+        pygame.draw.rect(self.screen, DARK_BLUE, button_rect, border_radius=10)
+        self.screen.blit(font.render(label, True, WHITE), (button_rect.x + 10, button_rect.y + 10))
 
-def display_achievements():
-    """Displays active achievements on the screen."""
-    global active_achievements
-    y_offset = HEIGHT - 50
-    for message, start_time in active_achievements:
-        elapsed_time = time.time() - start_time
-        if elapsed_time < 4:  # Display for 4 seconds
-            achievement_text = small_font.render(message, True, BLACK)
-            screen.blit(achievement_text, (WIDTH // 2 - achievement_text.get_width() // 2, y_offset))
-            y_offset += 30  # Move the next achievement 30 units lower
+        if button_rect.collidepoint(pygame.mouse.get_pos()):
+            if pygame.mouse.get_pressed()[0] and not self.mouse_click:  # Left click
+                self.mouse_click = True
+                action()
+        elif not pygame.mouse.get_pressed()[0]:
+            self.mouse_click = False
+
+    def draw_upgrade_button(self, label, position, action):
+        """Helper method to draw the upgrade button."""
+        button_rect = pygame.Rect(position[0], position[1], 200, 50)
+        pygame.draw.rect(self.screen, GREEN, button_rect, border_radius=10)
+        self.screen.blit(font.render(label, True, WHITE), (button_rect.x + 10, button_rect.y + 10))
+        self.screen.blit(small_font.render(f"Cost: ${self.upgrade_cost}", True, BLACK), (button_rect.x + 5, button_rect.y + 55))
+        self.screen.blit(small_font.render(f"Upgrades: {self.upgrade_count}", True, BLACK), (button_rect.x + 210, button_rect.y + 15))
+
+        if button_rect.collidepoint(pygame.mouse.get_pos()):
+            if pygame.mouse.get_pressed()[0] and not self.mouse_click:  # Left click
+                self.mouse_click = True
+                action()
+        elif not pygame.mouse.get_pressed()[0]:
+            self.mouse_click = False
+
+    def draw_estate_button(self, label, position, estate):
+        """Helper method to draw an estate button with cost and count.""" 
+        button_rect = pygame.Rect(position[0], position[1], 200, 50)
+        pygame.draw.rect(self.screen, DARK_GREEN, button_rect, border_radius=10)
+        self.screen.blit(font.render(label, True, WHITE), (button_rect.x + 10, button_rect.y + 10))
+        self.screen.blit(small_font.render(f"Cost: ${estate.cost}", True, BLACK), (button_rect.x + 5, button_rect.y + 55))
+        self.screen.blit(small_font.render(f"Count: {estate.count}", True, BLACK), (button_rect.x + 210, button_rect.y + 15))
+
+        if button_rect.collidepoint(pygame.mouse.get_pos()):
+            if pygame.mouse.get_pressed()[0] and not self.mouse_click:  # Left click
+                self.mouse_click = True
+                self.hire_worker(estate)
+        elif not pygame.mouse.get_pressed()[0]:
+            self.mouse_click = False
+
+    def draw_roulette_button(self, label, position, action):
+        """Helper method to draw the roulette button.""" 
+        button_rect = pygame.Rect(WIDTH - 240, 120, 200, 50)
+        pygame.draw.rect(self.screen, DARK_YELLOW, button_rect, border_radius=10)
+        self.screen.blit(font.render(label, True, WHITE), (button_rect.x + 10, button_rect.y + 10))
+
+        if button_rect.collidepoint(pygame.mouse.get_pos()):
+            if pygame.mouse.get_pressed()[0] and not self.mouse_click:  # Left click
+                self.mouse_click = True
+                action()
+        elif not pygame.mouse.get_pressed()[0]:
+            self.mouse_click = False
+
+    def hire_worker(self, worker):
+        """Hire the worker and deduct cost.""" 
+        if self.player.balance >= worker.cost:
+            self.player.balance -= worker.cost
+            worker.hire()
+            self.player.rps += worker.rps
+
+    def create_points(self):
+        """Method to create points.""" 
+        self.player.balance += 100  # Add a fixed amount of balance
+        self.player.score += 100    # Add a fixed amount of score
+        self.player.create_value += 1  # Add a fixed amount of create value
+
+    def upgrade_points(self):
+        """Method to upgrade the points creation.""" 
+        if self.player.balance >= self.upgrade_cost:
+            self.player.balance -= self.upgrade_cost
+            self.upgrade_count += 1
+            self.upgrade_cost = int(self.upgrade_cost * 1.5)  # Increase upgrade cost
+            self.player.create_value += 1
+
+    def upgrade_worker(self, worker):
+        """Upgrade the worker and deduct cost.""" 
+        if self.player.balance >= worker.cost:
+            self.player.balance -= worker.cost
+            worker.hire()
+            self.player.rps += worker.rps
+            worker.cost = int(worker.cost * 1.5)  # Increase worker's cost by 1.5 times
+
+    def upgrade_estate(self, estate):
+        """Upgrade the estate and deduct cost.""" 
+        if self.player.balance >= estate.cost:
+            self.player.balance -= estate.cost
+            estate.hire()
+            self.player.rps += estate.rps
+            estate.cost = int(estate.cost * 1.5)  # Increase estate's cost by 1.5 times
+
+    def check_evolution(self):
+        """Check if the player can evolve.""" 
+        if self.player.create_value >= 100:
+            self.evolve()
+
+    def evolve(self):
+        """Method to evolve the player.""" 
+        if self.player.create_value >= 100:
+            self.player.create_value = 1
+            self.player.rps += 10
+            self.upgrade_cost = 500 
+            self.upgrade_count = 0
+            self.player.balance += 1000
+            self.player.score += 1000
+            self.player.estates += 1
+            self.player.level += 1
+            # add other evolution effects here
+
+    def place_bet(self):
+        """Method to handle placing bets and spinning the roulette.""" 
+        if self.player.balance > 0:  # Check if balance is greater than 0
+            self.bet_amount = 100  # Example bet amount
+            self.player.balance -= self.bet_amount
+            self.spin_in_progress = True
+            self.roulette_spin()
         else:
-            active_achievements.remove((message, start_time))
+            print("Insufficient balance to place a bet.")
 
+    def roulette_spin(self):
+        """Simulate the roulette spin.""" 
+        if self.spin_in_progress:
+            spin_result = random.randint(0, 12)  # Simulate a spin result
+            if spin_result == 10:
+                self.player.balance += self.bet_amount * 35
+            elif spin_result == 11:
+                self.player.balance += self.bet_amount * 2
+            elif spin_result == 12:
+                self.player.balance += self.bet_amount * 5
+            self.spin_in_progress = False
+            self.bet_amount = 0
 
-def handle_button_click(mouse_x, mouse_y):
-    """Handles button clicks and updates the game state accordingly."""
-    global balance, score, point_value, upgrade_cost, worker_cost, grand_worker_cost, estate_cost
-    global upgrade_count, worker_count, grand_worker_count, total_estates, rps
+        else:
+            print("Spin is already in progress.")
 
-    # CREATE button
-    if create_button_rect.collidepoint(mouse_x, mouse_y):
-        balance += point_value
-        score += point_value
+    def run(self):
+        """Main game loop.""" 
+        running = True
+        while running:
+            self.update_game()
+            self.draw_ui()
 
-    # UPGRADE button
-    elif upgrade_button_rect.collidepoint(mouse_x, mouse_y) and balance >= upgrade_cost:
-        balance -= upgrade_cost
-        point_value *= 2
-        upgrade_count += 1
-        upgrade_cost *= 2
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
 
-    # WORKER button
-    elif worker_button_rect.collidepoint(mouse_x, mouse_y) and balance >= worker_cost:
-        balance -= worker_cost
-        worker_count += 1
-        rps += worker_rps  # Update the rate per second (rps)
+            pygame.display.update()
+            self.clock.tick(FPS)
 
-    # GRAND WORKER button
-    elif grand_worker_button_rect.collidepoint(mouse_x, mouse_y) and balance >= grand_worker_cost:
-        balance -= grand_worker_cost
-        grand_worker_count += 1
-        rps += grand_worker_rps  # Update the rate per second (rps)
-
-    # ESTATE button
-    elif estate_button_rect.collidepoint(mouse_x, mouse_y) and balance >= estate_cost:
-        balance -= estate_cost
-        total_estates += 1
-
-
-def main():
-    """Main game loop."""
-    global score, balance, last_update_time, rps
-
-    running = True
-    while running:
-        screen.fill(WHITE)
-        display_score()
-        draw_buttons()
-        check_achievements()
-        display_achievements()
-
-        # Update workers (affect balance)
-        update_workers()
-
-        pygame.display.flip()
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                handle_button_click(*event.pos)
-
-    pygame.quit()
-
+        pygame.quit()
 
 if __name__ == "__main__":
-    main()
+    game = Game()
+    game.run()
