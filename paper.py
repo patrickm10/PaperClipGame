@@ -314,16 +314,6 @@ class Game:
             self.player.level += 1
             # add other evolution effects here
 
-    def place_bet(self):
-        """Method to handle placing bets and spinning the roulette.""" 
-        if self.player.balance > 0:  # Check if balance is greater than 0
-            self.bet_amount = 100  # Example bet amount
-            self.player.balance -= self.bet_amount
-            self.spin_in_progress = True
-            self.roulette_spin()
-        else:
-            print("Insufficient balance to place a bet.")
-
     def roulette_spin(self):
         """Simulate the roulette spin.""" 
         if self.spin_in_progress:
